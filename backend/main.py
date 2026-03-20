@@ -207,16 +207,16 @@ def _keyword_route(text: str) -> dict:
     """Fast keyword-based routing when LLM is unavailable or misbehaves."""
     t = text.lower()
     if any(k in t for k in ["架构", "设计", "系统设计", "技术选型", "architecture", "design"]):
-        return {"intent": "architecture", "targets": ["alpha"], "model": "", "reason": "关键词匹配: architecture"}
+        return {"intent": "architecture", "target_agents": ["alpha"], "model_override": "", "reason": "关键词匹配: architecture"}
     if any(k in t for k in ["代码", "实现", "算法", "重构", "code", "implement", "algorithm"]):
-        return {"intent": "coding", "targets": ["beta"], "model": "", "reason": "关键词匹配: coding"}
+        return {"intent": "coding", "target_agents": ["beta"], "model_override": "", "reason": "关键词匹配: coding"}
     if any(k in t for k in ["测试", "bug", "边界", "风险", "test", "audit", "boundary"]):
-        return {"intent": "testing", "targets": ["gamma"], "model": "", "reason": "关键词匹配: testing"}
+        return {"intent": "testing", "target_agents": ["gamma"], "model_override": "", "reason": "关键词匹配: testing"}
     if any(k in t for k in ["部署", "运维", "监控", "扩展", "deploy", "ops", "monitor", "scale"]):
-        return {"intent": "operations", "targets": ["delta"], "model": "", "reason": "关键词匹配: operations"}
+        return {"intent": "operations", "target_agents": ["delta"], "model_override": "", "reason": "关键词匹配: operations"}
     if any(k in t for k in ["你好", "hi", "hello", "嗨", "天气", "吗"]):
-        return {"intent": "simple", "targets": ["all"], "model": "", "reason": "关键词匹配: simple"}
-    return {"intent": "general", "targets": ["all"], "model": "", "reason": "关键词默认: general"}
+        return {"intent": "simple", "target_agents": ["all"], "model_override": "", "reason": "关键词匹配: simple"}
+    return {"intent": "general", "target_agents": ["all"], "model_override": "", "reason": "关键词默认: general"}
 
 
 async def route_message(user_message: str) -> dict:
@@ -258,7 +258,7 @@ async def route_message(user_message: str) -> dict:
         return {
             "intent": result.get("intent", "general"),
             "target_agents": targets,
-            "model_override": result.get("model", result.get("model_override", "")),
+            "model_override": result.get("model", result.get("model_override", "")) or "",
             "reason": result.get("reason", ""),
         }
     except Exception as exc:  # noqa: BLE001
@@ -467,9 +467,11 @@ async def send_json(ws: WebSocket, data: dict) -> None:
 async def broadcast(data: dict) -> None:
     """Send a JSON message to all connected frontend clients."""
     dead = set()
-    for ws in clients:
-        await send_json(ws, data)
-        # Remove clients that raised during send (closed socket)
+    for ws in list(clients):
+        try:
+            await ws.send_json(data)
+        except Exception:
+            dead.add(ws)
     for ws in dead:
         clients.discard(ws)
 
@@ -609,28 +611,48 @@ async def stream_ai_response(agent_id: str, user_message: str, model_override: s
         )
 
         try:
-            print(f"[Agent {agent_id}] starting LLM call")
-            # 3. Call LLM directly via httpx (bypassing langchain to avoid streaming/aiohttp issues
-            # with Dashscope qwen3.5-plus which sends reasoning_content separately)
+            print(f"[Agent {agent_id}] starting LLM call (provider={PROVIDER})")
+            # 3. Provider-agnostic LLM call via httpx OpenAI-compatible endpoint
             model_name = model_override or _agent_models.get(agent_id, _model_default())
+
+            # Resolve base URL and API key based on active provider
+            if PROVIDER == "ollama":
+                base_url = f"{OLLAMA_URL}/v1"
+                api_key = "ollama"
+            elif PROVIDER == "dashscope":
+                base_url = DASHSCOPE_BASE_URL
+                api_key = DASHSCOPE_API_KEY
+            elif PROVIDER == "minimax":
+                base_url = MINIMAX_BASE_URL
+                api_key = MINIMAX_API_KEY
+            elif PROVIDER == "zhipu":
+                base_url = ZHIPU_BASE_URL
+                api_key = ZHIPU_API_KEY
+            elif PROVIDER == "kimi":
+                base_url = KIMI_BASE_URL
+                api_key = KIMI_API_KEY
+            else:
+                raise ValueError(f"Unknown LLM provider: {PROVIDER}")
+
             payload = {
                 "model": model_name,
                 "messages": [
                     {"role": "system", "content": system_with_memory},
                     {"role": "user", "content": user_message},
                 ],
-                "max_tokens": 1024,
+                "max_tokens": 2048,
                 "stream": False,
             }
             headers = {
-                "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
+
             # Run blocking httpx call in thread pool to avoid blocking the asyncio event loop
             def _sync_call():
                 with httpx.Client(timeout=120.0) as client:
                     resp = client.post(
-                        f"{DASHSCOPE_BASE_URL}/chat/completions",
+                        f"{base_url}/chat/completions",
                         json=payload,
                         headers=headers,
                     )

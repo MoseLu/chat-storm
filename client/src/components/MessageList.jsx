@@ -1,7 +1,9 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useCallback, memo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { IconCopy, IconCheck, IconQuote, IconMaximize, IconMinimize, IconSun, IconMoon, IconCornerDownLeft } from './Icons';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { IconCopy, IconCheck, IconQuote, IconMaximize, IconMinimize, IconCornerDownLeft } from './Icons';
 
 const AGENT_META = {
   alpha: { name: 'Alpha',  title: '总架构师', color: '#818cf8' },
@@ -17,39 +19,213 @@ function formatTime(ts) {
   });
 }
 
-// Detect and parse code blocks from markdown-style text
-function parseContent(text) {
-  if (!text) return [];
+/* ── Fullscreen Portal ──────────────────────────────────────────────────── */
+function FullscreenCodeModal({ language, code, onClose }) {
+  const [copied, setCopied] = useState(false);
 
-  const parts = [];
-  const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match;
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    // Add text before code block
-    if (match.index > lastIndex) {
-      const beforeText = text.slice(lastIndex, match.index);
-      parts.push({ type: 'text', content: beforeText });
-    }
-    // Add code block
-    parts.push({
-      type: 'code',
-      language: match[1] || 'text',
-      content: match[2].trim(),
-    });
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push({ type: 'text', content: text.slice(lastIndex) });
-  }
-
-  return parts;
+  return (
+    <div className="code-fullscreen-overlay" onClick={onClose}>
+      <div className="code-fullscreen-container" onClick={(e) => e.stopPropagation()}>
+        <div className="code-block-header">
+          <div className="code-block-header-left">
+            <span className="code-block-dot red" />
+            <span className="code-block-dot yellow" />
+            <span className="code-block-dot green" />
+            <span className="code-block-language">{language || 'plaintext'}</span>
+          </div>
+          <div className="code-block-actions">
+            <button className={`code-action-btn ${copied ? 'copied' : ''}`} onClick={handleCopy}>
+              {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+              <span>{copied ? '已复制' : '复制'}</span>
+            </button>
+            <button className="code-action-btn" onClick={onClose}>
+              <IconMinimize size={14} />
+              <span>退出</span>
+            </button>
+          </div>
+        </div>
+        <div className="code-fullscreen-content">
+          <SyntaxHighlighter
+            language={language || 'plaintext'}
+            style={oneDark}
+            showLineNumbers
+            customStyle={{
+              margin: 0, borderRadius: 0, fontSize: '14px',
+              background: '#1e1e2e', maxHeight: '80vh', overflow: 'auto',
+            }}
+            codeTagProps={{ style: { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" } }}
+          >
+            {code}
+          </SyntaxHighlighter>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-/* Quote bubble for reply reference */
+/* ── CodeBlock — matches Doubao/Claude style ────────────────────────────── */
+const CodeBlock = memo(function CodeBlock({ language, code, onQuote }) {
+  const [copied, setCopied] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [code]);
+
+  const handleQuote = useCallback(() => {
+    const cleanedCode = code.split('\n').map(l => l.trim()).filter(Boolean).join(' ').substring(0, 100);
+    onQuote?.({ displayText: cleanedCode + (cleanedCode.length < code.length ? '...' : ''), language });
+  }, [code, language, onQuote]);
+
+  const lineCount = code.split('\n').length;
+  const lang = language || 'plaintext';
+
+  return (
+    <>
+      <div className="code-block-wrapper">
+        {/* Header bar */}
+        <div className="code-block-header">
+          <div className="code-block-header-left">
+            <span className="code-block-dot red" />
+            <span className="code-block-dot yellow" />
+            <span className="code-block-dot green" />
+            <span className="code-block-language">{lang}</span>
+            <span className="code-block-lines">{lineCount} 行</span>
+          </div>
+          <div className="code-block-actions">
+            <button className="code-action-btn" onClick={() => setCollapsed(v => !v)} title={collapsed ? '展开' : '折叠'}>
+              <span>{collapsed ? '▶ 展开' : '▼ 折叠'}</span>
+            </button>
+            {onQuote && (
+              <button className="code-action-btn" onClick={handleQuote} title="引用回复">
+                <IconCornerDownLeft size={14} />
+                <span>引用</span>
+              </button>
+            )}
+            <button className="code-action-btn" onClick={() => setFullscreen(true)} title="全屏">
+              <IconMaximize size={14} />
+              <span>全屏</span>
+            </button>
+            <button className={`code-action-btn ${copied ? 'copied' : ''}`} onClick={handleCopy} title="复制代码">
+              {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+              <span>{copied ? '已复制' : '复制'}</span>
+            </button>
+          </div>
+        </div>
+        {/* Code body */}
+        {!collapsed && (
+          <SyntaxHighlighter
+            language={lang}
+            style={oneDark}
+            showLineNumbers
+            customStyle={{
+              margin: 0,
+              borderRadius: '0 0 8px 8px',
+              fontSize: '13px',
+              lineHeight: '1.65',
+              background: '#1e1e2e',
+              padding: '16px 16px 16px 0',
+              maxHeight: '520px',
+              overflowY: 'auto',
+            }}
+            lineNumberStyle={{
+              minWidth: '2.5em',
+              paddingRight: '1em',
+              color: '#4b5263',
+              fontSize: '12px',
+              userSelect: 'none',
+            }}
+            codeTagProps={{ style: { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" } }}
+            wrapLongLines={false}
+          >
+            {code}
+          </SyntaxHighlighter>
+        )}
+        {collapsed && (
+          <div className="code-collapsed-placeholder" onClick={() => setCollapsed(false)}>
+            点击展开 ({lineCount} 行)
+          </div>
+        )}
+      </div>
+
+      {fullscreen && (
+        <FullscreenCodeModal language={lang} code={code} onClose={() => setFullscreen(false)} />
+      )}
+    </>
+  );
+});
+
+/* ── Inline Code ─────────────────────────────────────────────────────────── */
+function InlineCode({ children }) {
+  return <code className="inline-code">{children}</code>;
+}
+
+/* ── MarkdownContent — full GFM markdown rendering ─────────────────────── */
+function MarkdownContent({ text, onQuote, stream = false }) {
+  const components = {
+    // Code blocks
+    code({ node, inline, className, children, ...props }) {
+      const match = /language-(\w+)/.exec(className || '');
+      const lang = match ? match[1] : '';
+      const code = String(children).replace(/\n$/, '');
+
+      if (!inline && (match || code.includes('\n'))) {
+        return <CodeBlock language={lang} code={code} onQuote={onQuote} />;
+      }
+      return <InlineCode>{code}</InlineCode>;
+    },
+    // Paragraphs — tighten spacing in bubbles
+    p({ children }) {
+      return <p className="md-p">{children}</p>;
+    },
+    // Headings
+    h1({ children }) { return <h1 className="md-h1">{children}</h1>; },
+    h2({ children }) { return <h2 className="md-h2">{children}</h2>; },
+    h3({ children }) { return <h3 className="md-h3">{children}</h3>; },
+    // Lists
+    ul({ children }) { return <ul className="md-ul">{children}</ul>; },
+    ol({ children }) { return <ol className="md-ol">{children}</ol>; },
+    li({ children }) { return <li className="md-li">{children}</li>; },
+    // Blockquote
+    blockquote({ children }) { return <blockquote className="md-blockquote">{children}</blockquote>; },
+    // Table (GFM)
+    table({ children }) { return <div className="md-table-wrap"><table className="md-table">{children}</table></div>; },
+    thead({ children }) { return <thead>{children}</thead>; },
+    tbody({ children }) { return <tbody>{children}</tbody>; },
+    tr({ children }) { return <tr>{children}</tr>; },
+    th({ children }) { return <th className="md-th">{children}</th>; },
+    td({ children }) { return <td className="md-td">{children}</td>; },
+    // Horizontal rule
+    hr() { return <hr className="md-hr" />; },
+    // Links — open in new tab safely
+    a({ href, children }) {
+      return <a href={href} target="_blank" rel="noopener noreferrer" className="md-link">{children}</a>;
+    },
+    // Strong / em
+    strong({ children }) { return <strong className="md-strong">{children}</strong>; },
+    em({ children }) { return <em className="md-em">{children}</em>; },
+  };
+
+  return (
+    <div className={`md-content ${stream ? 'streaming' : ''}`}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {text || ''}
+      </ReactMarkdown>
+      {stream && <span className="typing-cursor" />}
+    </div>
+  );
+}
+
+/* ── Quote bubble ────────────────────────────────────────────────────────── */
 function QuoteBubble({ quotedText, agentName }) {
   return (
     <div className="quote-bubble">
@@ -64,187 +240,7 @@ function QuoteBubble({ quotedText, agentName }) {
   );
 }
 
-function CodeBlock({ language, code, codeIndex, onQuote, onFullscreen }) {
-  const [copied, setCopied] = useState(false);
-  const [isDark, setIsDark] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleQuote = () => {
-    // Clean up code for display (remove extra whitespace, newlines)
-    const cleanedCode = code
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0)
-      .join(' ')
-      .substring(0, 100);
-
-    const displayText = cleanedCode.length < code.length ? cleanedCode + '...' : cleanedCode;
-
-    onQuote?.({
-      codeIndex,
-      displayText,
-      language
-    });
-  };
-
-  const toggleTheme = () => {
-    setIsDark(!isDark);
-  };
-
-  const toggleFullscreen = () => {
-    setIsFullscreen(!isFullscreen);
-    onFullscreen?.(!isFullscreen);
-  };
-
-  const theme = isDark ? oneDark : oneLight;
-  const codeStyle = {
-    margin: 0,
-    borderRadius: '0 0 8px 8px',
-    fontSize: '13px',
-    lineHeight: '1.6',
-    background: isDark ? '#282c34' : '#fafafa',
-    paddingTop: '16px',
-    color: isDark ? '#abb2bf' : '#24292e',
-  };
-
-  const CodeContent = () => (
-    <SyntaxHighlighter
-      language={language}
-      style={theme}
-      customStyle={codeStyle}
-      codeTagProps={{
-        style: {
-          color: 'inherit',
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-        }
-      }}
-      showLineNumbers
-      wrapLines
-    >
-      {code}
-    </SyntaxHighlighter>
-  );
-
-  return (
-    <>
-      <div className={`code-block-wrapper ${isFullscreen ? 'fullscreen' : ''}`}>
-        <div className="code-block-header">
-          <span className="code-block-language">{language || 'code'}</span>
-          <div className="code-block-actions">
-            <button
-              className={`code-action-btn ${copied ? 'copied' : ''}`}
-              onClick={handleCopy}
-              title="复制代码"
-            >
-              {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-              <span>{copied ? '已复制' : '复制'}</span>
-            </button>
-            <button
-              className="code-action-btn"
-              onClick={handleQuote}
-              title="引用回复"
-            >
-              <IconCornerDownLeft size={14} />
-              <span>引用</span>
-            </button>
-            <button
-              className="code-action-btn"
-              onClick={toggleTheme}
-              title={isDark ? '切换到浅色' : '切换到深色'}
-            >
-              {isDark ? <IconSun size={14} /> : <IconMoon size={14} />}
-              <span>{isDark ? '浅色' : '深色'}</span>
-            </button>
-            <button
-              className="code-action-btn"
-              onClick={toggleFullscreen}
-              title={isFullscreen ? '退出全屏' : '全屏'}
-            >
-              {isFullscreen ? <IconMinimize size={14} /> : <IconMaximize size={14} />}
-              <span>{isFullscreen ? '退出' : '全屏'}</span>
-            </button>
-          </div>
-        </div>
-        <CodeContent />
-      </div>
-
-      {/* Fullscreen Overlay */}
-      {isFullscreen && (
-        <div className="code-fullscreen-overlay" onClick={toggleFullscreen}>
-          <div className="code-fullscreen-container" onClick={(e) => e.stopPropagation()}>
-            <div className="code-block-header">
-              <span className="code-block-language">{language || 'code'}</span>
-              <div className="code-block-actions">
-                <button
-                  className={`code-action-btn ${copied ? 'copied' : ''}`}
-                  onClick={handleCopy}
-                  title="复制代码"
-                >
-                  {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-                  <span>{copied ? '已复制' : '复制'}</span>
-                </button>
-                <button
-                  className="code-action-btn"
-                  onClick={handleQuote}
-                  title="引用回复"
-                >
-                  <IconCornerDownLeft size={14} />
-                  <span>引用</span>
-                </button>
-                <button
-                  className="code-action-btn"
-                  onClick={toggleTheme}
-                  title={isDark ? '切换到浅色' : '切换到深色'}
-                >
-                  {isDark ? <IconSun size={14} /> : <IconMoon size={14} />}
-                  <span>{isDark ? '浅色' : '深色'}</span>
-                </button>
-                <button
-                  className="code-action-btn"
-                  onClick={toggleFullscreen}
-                  title="退出全屏"
-                >
-                  <IconMinimize size={14} />
-                  <span>退出</span>
-                </button>
-              </div>
-            </div>
-            <div className="code-fullscreen-content">
-              <SyntaxHighlighter
-                language={language}
-                style={theme}
-                customStyle={{
-                  ...codeStyle,
-                  borderRadius: 0,
-                  fontSize: '14px',
-                  maxHeight: '80vh',
-                  overflow: 'auto',
-                }}
-                codeTagProps={{
-                  style: {
-                    color: 'inherit',
-                    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                  }
-                }}
-                showLineNumbers
-                wrapLines
-              >
-                {code}
-              </SyntaxHighlighter>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
+/* ── Welcome Banner ──────────────────────────────────────────────────────── */
 function WelcomeBanner() {
   return (
     <div className="welcome-banner">
@@ -262,39 +258,7 @@ function WelcomeBanner() {
   );
 }
 
-function ChatBubble({ text, agentId, stream = false, messageId, onQuote, onFullscreen }) {
-  const parts = parseContent(text);
-
-  return (
-    <div className={`message-bubble ${agentId}`}>
-      {parts.map((part, index) => {
-        if (part.type === 'code') {
-          return (
-            <CodeBlock
-              key={index}
-              language={part.language}
-              code={part.content}
-              codeIndex={`${messageId}-${index}`}
-              onQuote={onQuote}
-              onFullscreen={onFullscreen}
-            />
-          );
-        }
-        return (
-          <span key={index} className="message-text-part">
-            {part.content}
-          </span>
-        );
-      })}
-      {stream && <span className="typing-cursor" />}
-    </div>
-  );
-}
-
-/**
- * UnifiedBubble — single avatar, single bubble.
- * Seamlessly transitions: dots → streaming text, no double rendering.
- */
+/* ── UnifiedBubble — thinking dots → streaming markdown ─────────────────── */
 function UnifiedBubble({ agentId, text, isThinking }) {
   return (
     <div className={`message-bubble ${agentId}`}>
@@ -306,35 +270,30 @@ function UnifiedBubble({ agentId, text, isThinking }) {
           <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>正在思考...</span>
         </>
       ) : (
-        <>
-          {text}
-          <span className="typing-cursor" />
-        </>
+        <MarkdownContent text={text} stream />
       )}
     </div>
   );
 }
 
+/* ── MessageList (main export) ───────────────────────────────────────────── */
 export default function MessageList({ messages, thinking, streamTexts, selectedTarget, messagesEndRef, onImageClick, onQuote }) {
   const containerRef = useRef(null);
 
-  // ── Historical messages filtered by channel ──────────────────────
   const visible = messages.filter((m) => {
     if (selectedTarget === 'all') return true;
     if (m.type === 'user') return true;
     return m.agentId === selectedTarget;
   });
 
-  // ── Live items: one row per agent — either dots or streaming text ─
-  // Build the set of agentIds that are currently "live"
   const liveAgentIds = new Set([
-    ...Object.keys(streamTexts),          // agents with streaming text
-    ...Object.keys(thinking).filter((a) => !streamTexts[a]), // thinking-only agents
+    ...Object.keys(streamTexts),
+    ...Object.keys(thinking).filter((a) => !streamTexts[a]),
   ]);
 
   const liveItems = Array.from(liveAgentIds).map((agentId) => ({
     agentId,
-    text:      streamTexts[agentId] ?? '',
+    text:       streamTexts[agentId] ?? '',
     isThinking: thinking[agentId] === true && !streamTexts[agentId],
   }));
 
@@ -344,14 +303,13 @@ export default function MessageList({ messages, thinking, streamTexts, selectedT
 
   return (
     <div className="chat-area" ref={containerRef}>
-      {visible.length === 0 && visibleLive.length === 0 && (
-        <WelcomeBanner />
-      )}
+      {visible.length === 0 && visibleLive.length === 0 && <WelcomeBanner />}
 
-      {/* ── Historical messages ───────────────────────────────────── */}
+      {/* ── Historical messages ──────────────────────────────────── */}
       {visible.map((msg) => {
-        const meta = msg.agentId ? AGENT_META[msg.agentId] : null;
+        const meta    = msg.agentId ? AGENT_META[msg.agentId] : null;
         const agentName = msg.type === 'user' ? '你' : (meta?.name || msg.agentId);
+
         return (
           <div key={msg.id} className={`message-row ${msg.type === 'user' ? 'user' : ''}`}>
             <div className={`message-avatar ${msg.agentId}`}>
@@ -360,9 +318,7 @@ export default function MessageList({ messages, thinking, streamTexts, selectedT
             <div className="message-body">
               <div className="message-meta">
                 <span className={`message-sender ${msg.agentId}`}>
-                  {msg.type === 'user' ? (
-                    '你'
-                  ) : (
+                  {msg.type === 'user' ? '你' : (
                     <>
                       {meta?.name || msg.agentId}
                       {meta?.title && (
@@ -375,29 +331,31 @@ export default function MessageList({ messages, thinking, streamTexts, selectedT
                 </span>
                 <span className="message-time">{formatTime(msg.timestamp)}</span>
               </div>
-              {/* Image if present */}
+
               {msg.image && (
                 <div>
                   <img src={msg.image} alt="用户上传" className="message-image" onClick={() => onImageClick?.(msg.image)} />
                   {msg.visionDescription && (
-                    <div className="message-image-caption">
-                      AI 图片理解: {msg.visionDescription}
-                    </div>
+                    <div className="message-image-caption">AI 图片理解: {msg.visionDescription}</div>
                   )}
                 </div>
               )}
-              <ChatBubble
-                text={msg.text}
-                agentId={msg.agentId}
-                messageId={msg.id}
-                onQuote={(quoteData) => onQuote?.({ ...quoteData, agentName })}
-              />
+
+              <div className={`message-bubble ${msg.agentId}`}>
+                {msg.quote && (
+                  <QuoteBubble quotedText={msg.quote.displayText} agentName={msg.quote.agentName || '?'} />
+                )}
+                <MarkdownContent
+                  text={msg.text}
+                  onQuote={(q) => onQuote?.({ ...q, agentName })}
+                />
+              </div>
             </div>
           </div>
         );
       })}
 
-      {/* ── Live: one unified row per agent (no avatar duplication) ─ */}
+      {/* ── Live items ───────────────────────────────────────────── */}
       {visibleLive.map(({ agentId, text, isThinking }) => {
         const meta = AGENT_META[agentId];
         if (!meta) return null;
