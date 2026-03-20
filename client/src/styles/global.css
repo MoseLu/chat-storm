@@ -1157,3 +1157,228 @@ button:focus-visible,
   0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
   50%       { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   Markdown Content Styles — react-markdown + remark-gfm
+   ══════════════════════════════════════════════════════════════════ */
+
+.md-content {
+  line-height: 1.7;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Streaming cursor is a sibling to the md-content div */
+.md-content.streaming > :last-child {
+  display: inline;
+}
+
+/* ── Paragraphs ──────────────────────────────────────────────── */
+.md-content .md-p {
+  margin: 0 0 0.75em 0;
+}
+.md-content .md-p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Headings ────────────────────────────────────────────────── */
+.md-content .md-h1 {
+  font-size: 1.25em;
+  font-weight: 700;
+  margin: 0.9em 0 0.4em;
+  line-height: 1.3;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.25em;
+}
+.md-content .md-h2 {
+  font-size: 1.1em;
+  font-weight: 700;
+  margin: 0.8em 0 0.35em;
+  line-height: 1.35;
+}
+.md-content .md-h3 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0.7em 0 0.3em;
+  line-height: 1.4;
+}
+
+/* ── Lists ───────────────────────────────────────────────────── */
+.md-content .md-ul,
+.md-content .md-ol {
+  margin: 0.4em 0 0.75em 0;
+  padding-left: 1.6em;
+}
+.md-content .md-ul { list-style-type: disc; }
+.md-content .md-ol { list-style-type: decimal; }
+.md-content .md-li {
+  margin-bottom: 0.3em;
+  line-height: 1.65;
+}
+.md-content .md-li > .md-ul,
+.md-content .md-li > .md-ol {
+  margin: 0.25em 0 0.25em;
+}
+
+/* ── Blockquote ──────────────────────────────────────────────── */
+.md-content .md-blockquote {
+  margin: 0.5em 0 0.75em;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-muted);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.md-content .md-blockquote .md-p:last-child { margin-bottom: 0; }
+
+/* ── Horizontal rule ─────────────────────────────────────────── */
+.md-content .md-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+
+/* ── Links ───────────────────────────────────────────────────── */
+.md-content .md-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+.md-content .md-link:hover {
+  color: var(--accent-hover);
+  border-bottom-color: var(--accent-hover);
+}
+
+/* ── Strong / emphasis ───────────────────────────────────────── */
+.md-content .md-strong { font-weight: 700; color: var(--text-primary); }
+.md-content .md-em     { font-style: italic; }
+
+/* ── Inline code ─────────────────────────────────────────────── */
+.inline-code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.875em;
+  background: rgba(99, 102, 241, 0.08);
+  color: #6366f1;
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+/* ── GFM Tables ──────────────────────────────────────────────── */
+.md-content .md-table-wrap {
+  overflow-x: auto;
+  margin: 0.75em 0;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+}
+.md-content .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+.md-content .md-th,
+.md-content .md-td {
+  padding: 8px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.md-content .md-th {
+  background: var(--bg-surface);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.md-content .md-td { color: var(--text-secondary); }
+.md-content .md-table tbody tr:last-child .md-td { border-bottom: none; }
+.md-content .md-table tbody tr:hover .md-td { background: var(--bg-hover); }
+
+/* ══════════════════════════════════════════════════════════════════
+   Enhanced Code Block Header — macOS window button style
+   ══════════════════════════════════════════════════════════════════ */
+
+.code-block-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* macOS-style traffic lights */
+.code-block-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.code-block-dot.red    { background: #ff5f57; }
+.code-block-dot.yellow { background: #febc2e; }
+.code-block-dot.green  { background: #28c840; }
+
+.code-block-lines {
+  color: #6b7280;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 4px;
+}
+
+/* Dark header for code blocks (matches oneDark theme) */
+.code-block-wrapper .code-block-header {
+  background: #181825;
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+.code-block-wrapper .code-block-language {
+  color: #a0aec0;
+  font-size: 11.5px;
+  text-transform: lowercase;
+  letter-spacing: 0.5px;
+}
+.code-block-wrapper .code-action-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #9ca3af;
+  font-size: 11px;
+}
+.code-block-wrapper .code-action-btn:hover {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #e2e8f0;
+  transform: translateY(-1px);
+}
+.code-block-wrapper .code-action-btn.copied {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
+/* Collapsed placeholder */
+.code-collapsed-placeholder {
+  background: #1e1e2e;
+  color: #6b7280;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 10px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  border-radius: 0 0 8px 8px;
+}
+.code-collapsed-placeholder:hover {
+  background: #252540;
+  color: #a0aec0;
+}
+
+/* Scrollbar styling for code blocks */
+.code-block-wrapper pre::-webkit-scrollbar { height: 6px; }
+.code-block-wrapper pre::-webkit-scrollbar-track { background: transparent; }
+.code-block-wrapper pre::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
+}
+.code-block-wrapper pre::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.25);
+}

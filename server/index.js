@@ -177,6 +177,20 @@ app.get('/api/history/:agentId', (req, res) => {
   res.json({ messages: filtered });
 });
 
+// ── Periodic dead-client cleanup ─────────────────────────────────
+setInterval(() => {
+  let removed = 0;
+  for (const ws of clients) {
+    if (ws.readyState !== 1 /* OPEN */) {
+      clients.delete(ws);
+      removed++;
+    }
+  }
+  if (removed > 0) {
+    console.log(`[ws] Cleaned up ${removed} dead client(s). Active: ${clients.size}`);
+  }
+}, 30_000);
+
 // ── WebSocket Server ──────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: '/ws' });
 
@@ -250,4 +264,48 @@ server.listen(PORT, () => {
     console.log(`   ${id.padEnd(6)} → 127.0.0.1:${port}`);
   }
   console.log(`\nWaiting for gateway connections...\n`);
+});
+
+// ── Graceful shutdown — prevent zombie processes ─────────────────
+function gracefulShutdown(signal) {
+  console.log(`\n[server] ${signal} received — shutting down gracefully...`);
+
+  // 1. Stop accepting new WebSocket connections
+  wss.close(() => console.log('[server] WebSocket server closed'));
+
+  // 2. Close all connected frontend clients
+  for (const ws of clients) {
+    try { ws.close(1001, 'Server shutting down'); } catch (_) {}
+  }
+  clients.clear();
+
+  // 3. Disconnect all gateway clients (stops reconnect timers)
+  for (const [id, gw] of Object.entries(gateways)) {
+    gw.disconnect();
+    console.log(`[server] Gateway ${id} disconnected`);
+  }
+
+  // 4. Close HTTP server
+  server.close(() => {
+    console.log('[server] HTTP server closed. Exiting.');
+    process.exit(0);
+  });
+
+  // Force-exit after 5 s if something is still hanging
+  setTimeout(() => {
+    console.error('[server] Forced exit after timeout');
+    process.exit(1);
+  }, 5000).unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+
+// ── Catch unhandled rejections — don't crash the process ─────────
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] Unhandled rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[server] Uncaught exception:', err);
+  // Don't exit — keep serving; log and continue
 });
