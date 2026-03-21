@@ -277,6 +277,33 @@ AGENT_IDS: List[Literal["alpha", "beta", "gamma", "delta"]] = [
     "delta",
 ]
 
+# ── Workflow chain (M2* inspired sequential pipeline) ────────────
+WORKFLOW_CHAIN = ["alpha", "beta", "gamma", "delta"]
+
+WORKFLOW_STEP_INSTRUCTIONS: Dict[str, str] = {
+    "alpha": (
+        "【工作流第1步：架构规划】你是此工作流的第一位专家。"
+        "请为给定任务提供清晰的架构设计方案：技术选型依据、核心组件划分、接口与数据流设计。"
+        "你的输出将传递给代码工匠(Beta)、质量守门员(Gamma)和运维大脑(Delta)参考。"
+        "请结构化、可操作地呈现结论。"
+    ),
+    "beta": (
+        "【工作流第2步：代码实现】你是此工作流的第二位专家。"
+        "基于架构师的方案，给出具体的代码实现：核心代码片段、技术细节、实现注意事项。"
+        "无需重复架构层面已说的内容，直接聚焦代码实现。"
+    ),
+    "gamma": (
+        "【工作流第3步：质量审查】你是此工作流的第三位专家。"
+        "请审查前面的架构和实现方案：指出潜在风险、遗漏的边界情况、安全隐患、测试建议。"
+        "提供具体可操作的改进建议，不要泛泛而谈。"
+    ),
+    "delta": (
+        "【工作流第4步：运维规划】你是此工作流的最后一位专家。"
+        "请基于以上讨论，给出部署方案、监控告警策略、故障预案和扩展性建议。"
+        "输出一个可操作的运维清单。"
+    ),
+}
+
 AGENT_META: Dict[str, Dict[str, str]] = {
     "alpha": {
         "name": "总架构师",
@@ -577,23 +604,75 @@ class StreamingCallback:
 # AI response handler
 # ---------------------------------------------------------------------------
 
+def _resolve_provider_config(model_override: str = "", agent_id: Optional[str] = None):
+    """Resolve base_url, api_key, model_name from active provider and optional overrides."""
+    model_name = model_override or (
+        _agent_models.get(agent_id, _model_default()) if agent_id else _model_default()
+    )
+    if PROVIDER == "ollama":
+        return f"{OLLAMA_URL}/v1", "ollama", model_name
+    elif PROVIDER == "dashscope":
+        return DASHSCOPE_BASE_URL, DASHSCOPE_API_KEY, model_name
+    elif PROVIDER == "minimax":
+        return MINIMAX_BASE_URL, MINIMAX_API_KEY, model_name
+    elif PROVIDER == "zhipu":
+        return ZHIPU_BASE_URL, ZHIPU_API_KEY, model_name
+    elif PROVIDER == "kimi":
+        return KIMI_BASE_URL, KIMI_API_KEY, model_name
+    else:
+        raise ValueError(f"Unknown LLM provider: {PROVIDER}")
+
+
+async def _call_agent_llm(
+    agent_id: str,
+    system_prompt: str,
+    user_message: str,
+    model_override: str = "",
+) -> str:
+    """Core LLM call (non-streaming). Returns full response text."""
+    base_url, api_key, model_name = _resolve_provider_config(model_override, agent_id)
+
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        "max_tokens": 2048,
+        "stream": False,
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    def _sync_call():
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
+            resp.raise_for_status()
+            result = resp.json()
+            choices = result.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "").strip()
+            return ""
+
+    return await asyncio.to_thread(_sync_call)
+
+
 async def stream_ai_response(agent_id: str, user_message: str, model_override: str = "") -> None:
     """
     Call the LLM for a single agent and stream the response back to clients.
 
     Protocol sequence per agent:
       1. ai_thinking  (server → client)
-      2. ai_event delta × N  (streamed)
+      2. ai_event delta  (complete text)
       3. ai_event final  (when complete)
       4. ai_event error  (if something goes wrong)
     """
     async with _response_locks[agent_id]:
-        # 1. Notify thinking state
         print(f"[Agent {agent_id}] broadcasting thinking")
         await broadcast(build_ai_thinking_payload(agent_id))
 
-        # 2. Retrieve relevant memories from ChromaDB
         meta = AGENT_META[agent_id]
+
+        # Retrieve relevant memories from ChromaDB
         memories = await memory_search(user_message, top_k=5)
         memory_block = ""
         if memories:
@@ -603,7 +682,6 @@ async def stream_ai_response(agent_id: str, user_message: str, model_override: s
             ]
             memory_block = "\n".join(memory_lines) + "\n\n"
 
-        # Build system prompt with memory context
         system_with_memory = (
             meta["system"]
             + ("\n\n" + memory_block if memory_block else "")
@@ -612,70 +690,16 @@ async def stream_ai_response(agent_id: str, user_message: str, model_override: s
 
         try:
             print(f"[Agent {agent_id}] starting LLM call (provider={PROVIDER})")
-            # 3. Provider-agnostic LLM call via httpx OpenAI-compatible endpoint
-            model_name = model_override or _agent_models.get(agent_id, _model_default())
-
-            # Resolve base URL and API key based on active provider
-            if PROVIDER == "ollama":
-                base_url = f"{OLLAMA_URL}/v1"
-                api_key = "ollama"
-            elif PROVIDER == "dashscope":
-                base_url = DASHSCOPE_BASE_URL
-                api_key = DASHSCOPE_API_KEY
-            elif PROVIDER == "minimax":
-                base_url = MINIMAX_BASE_URL
-                api_key = MINIMAX_API_KEY
-            elif PROVIDER == "zhipu":
-                base_url = ZHIPU_BASE_URL
-                api_key = ZHIPU_API_KEY
-            elif PROVIDER == "kimi":
-                base_url = KIMI_BASE_URL
-                api_key = KIMI_API_KEY
-            else:
-                raise ValueError(f"Unknown LLM provider: {PROVIDER}")
-
-            payload = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": system_with_memory},
-                    {"role": "user", "content": user_message},
-                ],
-                "max_tokens": 2048,
-                "stream": False,
-            }
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-
-            # Run blocking httpx call in thread pool to avoid blocking the asyncio event loop
-            def _sync_call():
-                with httpx.Client(timeout=120.0) as client:
-                    resp = client.post(
-                        f"{base_url}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
-                    resp.raise_for_status()
-                    result = resp.json()
-                    choices = result.get("choices", [])
-                    if choices:
-                        return choices[0].get("message", {}).get("content", "").strip()
-                    return ""
-
-            full_text = await asyncio.to_thread(_sync_call)
+            full_text = await _call_agent_llm(agent_id, system_with_memory, user_message, model_override)
             print(f"[Agent {agent_id}] LLM done, text_len={len(full_text)}")
 
-            # 4. Broadcast complete response
             if full_text:
-                # Fire a single delta with the complete text (fast path)
                 asyncio.create_task(broadcast(build_ai_event_payload({
                     "type": "delta",
                     "agentId": agent_id,
                     "text": full_text,
                 })))
 
-                # Persist to history
                 ts = int(time.time() * 1000)
                 ai_msg = {
                     "id": f"ai-{agent_id}-{ts}",
@@ -686,22 +710,19 @@ async def stream_ai_response(agent_id: str, user_message: str, model_override: s
                 }
                 message_history.append(ai_msg)
                 await broadcast(build_msg_payload(ai_msg))
-                # Store in ChromaDB vector memory (fire-and-forget)
                 asyncio.create_task(memory_add(full_text, {
                     "agent_id": agent_id,
                     "type": "ai",
                     "timestamp": ts,
                 }))
 
-            final_payload = build_ai_event_payload({
+            await broadcast(build_ai_event_payload({
                 "type": "final",
                 "agentId": agent_id,
                 "text": full_text,
-            })
-            await broadcast(final_payload)
+            }))
 
         except Exception as exc:  # noqa: BLE001
-            # Send error event if the LLM call itself fails — also persist
             print(f"[Agent {agent_id}] EXCEPTION: {type(exc).__name__}: {exc}")
             error_text = f"[{meta['name']}] 调用失败: {exc}"
             error_msg = {
@@ -713,12 +734,163 @@ async def stream_ai_response(agent_id: str, user_message: str, model_override: s
             }
             message_history.append(error_msg)
             await broadcast(build_msg_payload(error_msg))
-            error_payload = build_ai_event_payload({
+            await broadcast(build_ai_event_payload({
                 "type": "error",
                 "agentId": agent_id,
                 "text": error_text,
-            })
-            await broadcast(error_payload)
+            }))
+
+
+# ---------------------------------------------------------------------------
+# Workflow engine (M2* inspired sequential pipeline)
+# ---------------------------------------------------------------------------
+
+async def _stream_workflow_step(
+    agent_id: str,
+    user_message: str,
+    session_id: str,
+    step: int,
+) -> str:
+    """Run one workflow step: broadcast thinking → call LLM → broadcast result. Returns full text."""
+    async with _response_locks[agent_id]:
+        await broadcast(build_ai_thinking_payload(agent_id))
+
+        meta = AGENT_META[agent_id]
+        system_prompt = meta["system"] + "\n\n" + WORKFLOW_STEP_INSTRUCTIONS[agent_id]
+
+        try:
+            full_text = await _call_agent_llm(agent_id, system_prompt, user_message)
+            print(f"[Workflow:{session_id}] step={step} agent={agent_id} text_len={len(full_text)}")
+
+            if full_text:
+                await broadcast(build_ai_event_payload({
+                    "type": "delta",
+                    "agentId": agent_id,
+                    "text": full_text,
+                }))
+
+                ts = int(time.time() * 1000)
+                ai_msg = {
+                    "id": f"wf-{session_id}-{agent_id}-{ts}",
+                    "type": "ai",
+                    "agentId": agent_id,
+                    "text": full_text,
+                    "workflowSession": session_id,
+                    "workflowStep": step,
+                    "timestamp": ts,
+                }
+                message_history.append(ai_msg)
+                await broadcast(build_msg_payload(ai_msg))
+                asyncio.create_task(memory_add(full_text, {
+                    "agent_id": agent_id,
+                    "type": "workflow",
+                    "session_id": session_id,
+                    "timestamp": ts,
+                }))
+
+            await broadcast(build_ai_event_payload({
+                "type": "final",
+                "agentId": agent_id,
+                "text": full_text,
+            }))
+            return full_text
+
+        except Exception as exc:  # noqa: BLE001
+            error_text = f"[{meta['name']}] 工作流错误: {exc}"
+            print(f"[Workflow:{session_id}] step={step} agent={agent_id} ERROR: {exc}")
+            await broadcast(build_ai_event_payload({
+                "type": "error",
+                "agentId": agent_id,
+                "text": error_text,
+            }))
+            return ""
+
+
+async def process_workflow(task: str) -> None:
+    """
+    Run the M2* inspired sequential workflow: Alpha → Beta → Gamma → Delta.
+
+    Each agent receives the original task plus all previous agents' responses as context.
+    Broadcasts workflow_event messages so the frontend can show progress.
+    """
+    session_id = str(uuid.uuid4())[:8]
+    total = len(WORKFLOW_CHAIN)
+
+    print(f"[Workflow:{session_id}] starting — task={task[:60]}")
+
+    # Announce workflow start
+    await broadcast({
+        "type": "workflow_event",
+        "event": "start",
+        "sessionId": session_id,
+        "totalSteps": total,
+        "timestamp": int(time.time() * 1000),
+    })
+
+    # Persist user message
+    ts = int(time.time() * 1000)
+    user_msg = {
+        "id": str(uuid.uuid4()),
+        "type": "user",
+        "agentId": "user",
+        "text": task,
+        "workflowSession": session_id,
+        "timestamp": ts,
+    }
+    message_history.append(user_msg)
+    await broadcast(build_msg_payload(user_msg))
+    asyncio.create_task(memory_add(task, {"agent_id": "user", "type": "workflow", "session_id": session_id, "timestamp": ts}))
+
+    context_parts: List[tuple] = []  # [(agent_id, response_text), ...]
+
+    for step_idx, agent_id in enumerate(WORKFLOW_CHAIN):
+        step = step_idx + 1
+
+        # Broadcast step start
+        await broadcast({
+            "type": "workflow_event",
+            "event": "step_start",
+            "sessionId": session_id,
+            "step": step,
+            "totalSteps": total,
+            "agentId": agent_id,
+            "timestamp": int(time.time() * 1000),
+        })
+
+        # Build enriched prompt with previous agents' context
+        if context_parts:
+            context_block = "\n\n".join(
+                f"【{AGENT_META[prev_id]['name']}的分析】\n{prev_resp}"
+                for prev_id, prev_resp in context_parts
+            )
+            enriched = f"【任务】{task}\n\n【前序专家的分析】\n{context_block}"
+        else:
+            enriched = f"【任务】{task}"
+
+        response = await _stream_workflow_step(agent_id, enriched, session_id, step)
+        if response:
+            context_parts.append((agent_id, response))
+
+        # Broadcast step complete
+        await broadcast({
+            "type": "workflow_event",
+            "event": "step_complete",
+            "sessionId": session_id,
+            "step": step,
+            "totalSteps": total,
+            "agentId": agent_id,
+            "timestamp": int(time.time() * 1000),
+        })
+
+    # Broadcast workflow complete
+    await broadcast({
+        "type": "workflow_event",
+        "event": "complete",
+        "sessionId": session_id,
+        "totalSteps": total,
+        "timestamp": int(time.time() * 1000),
+    })
+    print(f"[Workflow:{session_id}] complete")
 
 
 async def process_send(target: str, message: str) -> List[str]:
@@ -923,6 +1095,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 image_b64 = msg.get("image", "")
                 if text and image_b64:
                     asyncio.create_task(process_send_with_image(target, text, image_b64))
+
+            elif msg_type == "workflow_start":
+                task = msg.get("task", "").strip()
+                if task:
+                    asyncio.create_task(process_workflow(task))
 
             # Unknown message types are silently ignored
 

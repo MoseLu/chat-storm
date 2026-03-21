@@ -1382,3 +1382,183 @@ button:focus-visible,
 .code-block-wrapper pre::-webkit-scrollbar-thumb:hover {
   background: rgba(255,255,255,0.25);
 }
+
+/* ── Workflow Progress Bar (header) ──────────────────────────────────────── */
+.workflow-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(59, 130, 246, 0.08));
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: var(--r-pill);
+  padding: 5px 14px;
+  animation: fadeIn 0.3s ease;
+}
+
+.workflow-progress-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #6d28d9;
+  white-space: nowrap;
+}
+
+.workflow-progress-track {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.workflow-progress-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  transition: background var(--transition-base), transform var(--transition-base);
+}
+
+.workflow-progress-dot.active {
+  background: #8b5cf6;
+  transform: scale(1.3);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.workflow-progress-dot.done {
+  background: #22c55e;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Agent Selector ──────────────────────────────────────────────────────── */
+.agent-selector {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 2px 4px;
+}
+
+.agent-sel-btn {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  line-height: 1.6;
+}
+
+.agent-sel-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.agent-sel-btn.active {
+  background: var(--sel-color, var(--accent));
+  color: #fff;
+  box-shadow: var(--shadow-xs);
+}
+
+/* ── Workflow Button in Toolbar ──────────────────────────────────────────── */
+.workflow-btn {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.workflow-btn.active {
+  background: rgba(139, 92, 246, 0.1);
+  color: #7c3aed;
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.workflow-btn.running {
+  animation: pulse 1s ease-in-out infinite;
+  color: #7c3aed;
+}
+
+/* ── Workflow Task Input Area ─────────────────────────────────────────────── */
+.workflow-input-area {
+  margin: 8px 0 4px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.04), rgba(59, 130, 246, 0.04));
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: var(--r-md);
+  padding: 10px 12px 8px;
+  animation: fadeIn 0.2s ease;
+}
+
+.workflow-input-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.workflow-input-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #7c3aed;
+}
+
+.workflow-input-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.workflow-input-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  transition: color var(--transition-fast);
+}
+
+.workflow-input-close:hover { color: var(--text-secondary); }
+
+.workflow-task-textarea {
+  margin-bottom: 8px !important;
+}
+
+.workflow-input-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.workflow-start-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 16px;
+  background: linear-gradient(135deg, #7c3aed, #6366f1);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.workflow-start-btn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.workflow-start-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
