@@ -7,6 +7,20 @@ import {
   IconMic, IconMicOff,
 } from './components/Icons.jsx';
 
+const AGENT_LABELS = {
+  alpha: 'α',
+  beta: 'β',
+  gamma: 'γ',
+  delta: 'δ',
+};
+
+const WORKFLOW_AGENT_NAMES = {
+  alpha: '总架构师',
+  beta: '代码工匠',
+  gamma: '质量守门员',
+  delta: '运维大脑',
+};
+
 const { TextArea } = Input;
 
 const AGENTS = [
@@ -39,6 +53,12 @@ export default function App() {
   const [voiceTranscript, setVoiceTranscript] = useState('');
   // Quote/Reply
   const [quote, setQuote] = useState(null); // { text, fullCode, language, agentName }
+  // Agent targeting
+  const [selectedTarget, setSelectedTarget] = useState('all');
+  // Workflow mode
+  const [workflowProgress, setWorkflowProgress] = useState(null); // null | { step, total, agentId, complete }
+  const [showWorkflowInput, setShowWorkflowInput] = useState(false);
+  const [workflowTask, setWorkflowTask] = useState('');
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const imageInputRef = useRef(null);
@@ -148,6 +168,21 @@ export default function App() {
         }
         break;
       }
+
+      case 'workflow_event': {
+        const { event, step, totalSteps, agentId } = msg;
+        if (event === 'start') {
+          setWorkflowProgress({ step: 0, total: totalSteps, agentId: null, complete: false });
+        } else if (event === 'step_start') {
+          setWorkflowProgress({ step, total: totalSteps, agentId, complete: false });
+        } else if (event === 'step_complete') {
+          setWorkflowProgress((prev) => prev ? { ...prev, step, agentId } : prev);
+        } else if (event === 'complete') {
+          setWorkflowProgress((prev) => prev ? { ...prev, complete: true } : prev);
+          setTimeout(() => setWorkflowProgress(null), 4000);
+        }
+        break;
+      }
     }
   }, []);
 
@@ -169,10 +204,10 @@ export default function App() {
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       if (imageData) {
-        ws.send(JSON.stringify({ type: 'send_with_image', target: 'all', message: text, image: imageData.url, quote }));
+        ws.send(JSON.stringify({ type: 'send_with_image', target: selectedTarget, message: text, image: imageData.url, quote }));
         setImageData(null);
       } else {
-        ws.send(JSON.stringify({ type: 'send', target: 'all', message: text, quote }));
+        ws.send(JSON.stringify({ type: 'send', target: selectedTarget, message: text, quote }));
       }
     }
 
@@ -187,8 +222,17 @@ export default function App() {
     if (e.key === 'Escape') {
       setFullscreenImage(null);
       setQuote(null);
+      setShowWorkflowInput(false);
     }
   }, [handleSend]);
+
+  const handleWorkflowStart = useCallback(() => {
+    const task = workflowTask.trim();
+    if (!task || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'workflow_start', task }));
+    setWorkflowTask('');
+    setShowWorkflowInput(false);
+  }, [ws, workflowTask]);
 
   const handleImageSelect = useCallback((e) => {
     const file = e.target.files?.[0];
@@ -340,12 +384,37 @@ export default function App() {
           </div>
         </div>
         <div className="header-right">
+          {workflowProgress && (
+            <div className="workflow-progress-bar">
+              <span className="workflow-progress-label">
+                {workflowProgress.complete
+                  ? '工作流完成 ✓'
+                  : workflowProgress.agentId
+                    ? `${WORKFLOW_AGENT_NAMES[workflowProgress.agentId]} 分析中... (${workflowProgress.step}/${workflowProgress.total})`
+                    : '工作流启动中...'}
+              </span>
+              <div className="workflow-progress-track">
+                {Array.from({ length: workflowProgress.total }, (_, i) => (
+                  <div
+                    key={i}
+                    className={`workflow-progress-dot ${
+                      workflowProgress.complete || i < workflowProgress.step
+                        ? 'done'
+                        : i === workflowProgress.step - 1 && !workflowProgress.complete
+                          ? 'active'
+                          : ''
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           {!connected && (
             <span style={{ fontSize: 12, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Spin size="small" /> 重连中...
             </span>
           )}
-          {allDisconnected && connected && (
+          {allDisconnected && connected && !workflowProgress && (
             <span style={{ fontSize: 12, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 6 }}>
               <IconWarning size={13} /> 所有网关离线
             </span>
@@ -358,7 +427,7 @@ export default function App() {
         messages={messages}
         thinking={thinking}
         streamTexts={streamTexts}
-        selectedTarget="all"
+        selectedTarget={selectedTarget}
         messagesEndRef={messagesEndRef}
         onImageClick={(url) => setFullscreenImage(url)}
         onQuote={(quote) => setQuote(quote)}
@@ -428,6 +497,39 @@ export default function App() {
             </div>
           )}
 
+          {/* Workflow task input — shown when workflow mode is activated */}
+          {showWorkflowInput && (
+            <div className="workflow-input-area">
+              <div className="workflow-input-header">
+                <span className="workflow-input-title">⚡ 工作流任务</span>
+                <span className="workflow-input-hint">Alpha→Beta→Gamma→Delta 依次分析</span>
+                <button className="workflow-input-close" onClick={() => setShowWorkflowInput(false)}>
+                  <IconX size={12} />
+                </button>
+              </div>
+              <TextArea
+                value={workflowTask}
+                onChange={(e) => setWorkflowTask(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleWorkflowStart(); }
+                  if (e.key === 'Escape') setShowWorkflowInput(false);
+                }}
+                placeholder="描述需要四位专家协作分析的任务..."
+                autoSize={{ minRows: 2, maxRows: 4 }}
+                className="input-textarea workflow-task-textarea"
+              />
+              <div className="workflow-input-footer">
+                <button
+                  className="workflow-start-btn"
+                  onClick={handleWorkflowStart}
+                  disabled={!workflowTask.trim() || !connected || !!workflowProgress}
+                >
+                  启动工作流
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Textarea */}
           <TextArea
             value={inputValue}
@@ -436,7 +538,9 @@ export default function App() {
             placeholder={
               voiceStatus === 'recording' ? '正在聆听...' :
               voiceStatus === 'processing' ? '识别中...' :
-              imageData ? '描述一下这张图片...' : '向所有 Agent 发起广播讨论...'
+              imageData ? '描述一下这张图片...' :
+              selectedTarget === 'all' ? '向所有 Agent 发起广播讨论...' :
+              `向 ${WORKFLOW_AGENT_NAMES[selectedTarget]} 提问...`
             }
             autoSize={false}
             disabled={!connected}
@@ -446,7 +550,7 @@ export default function App() {
 
           {/* Bottom toolbar */}
           <div className="input-toolbar">
-            {/* Left: upload + more tools */}
+            {/* Left: upload + agent selector + workflow */}
             <div className="toolbar-left">
               <button
                 className="toolbar-btn"
@@ -455,6 +559,32 @@ export default function App() {
                 title="上传图片"
               >
                 <IconImage size={16} />
+              </button>
+              <div className="agent-selector">
+                <button
+                  className={`agent-sel-btn ${selectedTarget === 'all' ? 'active' : ''}`}
+                  onClick={() => setSelectedTarget('all')}
+                  title="广播给所有 Agent"
+                >全部</button>
+                {AGENTS.map((a) => (
+                  <button
+                    key={a.id}
+                    className={`agent-sel-btn ${selectedTarget === a.id ? 'active' : ''}`}
+                    style={selectedTarget === a.id ? { '--sel-color': a.color } : {}}
+                    onClick={() => setSelectedTarget(a.id)}
+                    title={a.label}
+                  >
+                    {AGENT_LABELS[a.id]}
+                  </button>
+                ))}
+              </div>
+              <button
+                className={`toolbar-btn workflow-btn ${showWorkflowInput ? 'active' : ''} ${workflowProgress && !workflowProgress.complete ? 'running' : ''}`}
+                onClick={() => setShowWorkflowInput((v) => !v)}
+                disabled={!connected || (!!workflowProgress && !workflowProgress.complete)}
+                title="启动四阶段工作流"
+              >
+                ⚡
               </button>
             </div>
 
